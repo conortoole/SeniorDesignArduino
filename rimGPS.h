@@ -9,6 +9,7 @@
 class rimGPS: public TinyGPSPlus{
      public:
           rimGPS();
+          int baudrate = 9600;
           void initialize(SoftwareSerial serial, int baudrate);
 };
 

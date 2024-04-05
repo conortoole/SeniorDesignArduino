@@ -5,14 +5,13 @@
 rimGPS::rimGPS(){}
 
 void rimGPS::initialize(SoftwareSerial serial, int baudrate){
-     serial.begin(baudrate);
-     while (serial.available() > 0) {
+     //serial.begin(baudrate);
+     if (serial.available() > 0) {
           this->encode(serial.read());
-          Serial.println("Encoding...");
+          return;
      }
-
-     if (millis() > 5000 && this->charsProcessed() < 10) {
-         Serial.println(("No GPS detected: check wiring."));
-         while(true);
+     else{
+     	Serial.println(("No GPS detected: check wiring."));
+     	return;
      }
 }
