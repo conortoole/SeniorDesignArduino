@@ -8,10 +8,6 @@
 rimGPS gps; //remote ID module GPS 
 SoftwareSerial serial(A0, A1);
 rimLED gpsLED(10);
-//rimLED::Color red = rimLED::red;
-//rimLED::Color green = rimLED::green;
-//rimLED::Color blue = rimLED::blue;
-//rimLED::Color yellow = rimLED::yellow;
 
 void setup() {
   //comunicate to GPSrimLED::
@@ -24,11 +20,14 @@ void setup() {
 void loop() {
   delay(100);
   gps.initialize(serial, gps.baudrate); //comunicate to GPS
-  if (gps.location.lat() > 0){
-    gpsLED.On();
+  if (gps.location.lat() > 0){//this should probably be updated to something different
+      Serial.println(gps.location.lat());
+      gpsLED.On();
+      //evan put your bluetooth code in here 
   }
-  Serial.println(gps.location.lat());
-  // put your main code here, to run repeatedly:
+  else{
+      Serial.println("waiting on GPS signal...");
+  }
 
 }
 
