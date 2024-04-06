@@ -44,13 +44,12 @@ void setup() {
 void loop() {
      while (serial.available() > 0) {
           if(gps.encode(serial.read())){
-               if (gps.location.isValid()){
+               if (gps.location.isUpdated()){
                    gpsLED.On();
                }
                else{
                    gpsLED.Off();
                }
-               Serial.println(gps.location.isValid());
                Serial.println(gps.location.lat());
                Serial.println(gps.location.lng());
                Serial.println(gps.altitude.meters());
