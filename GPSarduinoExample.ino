@@ -1,83 +1,87 @@
-#include <TinyGPSPlus.h>
-#include <Arduino.h>
-#include <Adafruit_TinyUSB.h>
-#include <SoftwareSerial.h>
-/*
-   This sample sketch demonstrates the normal use of a TinyGPSPlus (TinyGPSPlus) object.
-   It requires the use of SoftwareSerial, and assumes that you have a
-   4800-baud serial GPS device hooked up on pins 4(rx) and 3(tx).
- */
-static const uint32_t GPSBaud = 9600;
+#include <bluefruit.h>
+#include <nrf_soc.h> 
 
-// The TinyGPSPlus object
-TinyGPSPlus gps;
+#define MANUFACTURER_ID   0x0059 //Nordic Manufacturer ID
 
-// The serial connection to the GPS device
-SoftwareSerial ss(A0, A1);
+uint8_t ad[16] = {
+  0x21, 0x21, 0x21, 0x21, 
+  0x21, 0x21, 0x21, 0x21,
+  0x21, 0x21, 0x21, 0x21, 
+  0x21, 0x21, 0x21, 0x21
+};
+
+void uint32_to_base20(uint32_t value, char* buffer) { 
+    char* ptr = buffer;
+    do {
+        uint32_t digit = value % 20;
+        *ptr++ = digit < 10 ? '0' + digit : 'A' + (digit - 10);
+        value /= 20;
+    } while (value != 0);
+    *ptr = '\0';
+
+    char* start = buffer;
+    char* end = ptr - 1;
+    while (start < end) {
+        char temp = *start;
+        *start++ = *end;
+        *end-- = temp;
+    }
+}
+
+// Set Beacon
+BLEBeacon beacon(ad, 1, 2, -54);
 
 void setup() {
-	Serial.begin(115200);
-	ss.begin(GPSBaud);
 
-	Serial.println(F("DeviceExample.ino"));
-	Serial.println(F("A simple demonstration of TinyGPSPlus with an attached GPS module"));
-	Serial.print(F("Testing TinyGPSPlus library v. ")); 
-	Serial.println(TinyGPSPlus::libraryVersion());
-	Serial.println(F("by Mikal Hart"));
-	Serial.println();
+ Serial.begin(115200);
+ while (!Serial) delay(20000);
+
+ Serial.println("Remote ID Module");
+ Serial.println("-----------------\n");
+
+ char bufferA[11];
+ uint32_to_base20(NRF_FICR->DEVICEID[0], bufferA);
+ char bufferB[11];
+ uint32_to_base20(NRF_FICR->DEVICEID[1], bufferB);
+
+}
+
+void startAdv(void)
+{  
+  Bluefruit.Advertising.setBeacon(beacon);
+  Bluefruit.ScanResponse.addName();
+  Bluefruit.Advertising.setType(BLE_GAP_PHY_CODED);
+  Bluefruit.Advertising.restartOnDisconnect(true);
+  Bluefruit.Advertising.setInterval(160, 160);    
+  Bluefruit.Advertising.setFastTimeout(30);      
+  Bluefruit.Advertising.start(0);               
+}
+
+void updateAdvertisement() {
+
+ //GPS gathering 
+
+ //Set new advertising data with GPS information
+
+ uint8_t newAd[16] = {
+    0x21, 0x21, 0x21, 0x21, 
+    0x21, 0x21, 0x21, 0x21,
+    0x21, 0x21, 0x23, 0x23, 
+    0x23, 0x23, 0x21, 0x21
+ };
+
+ memcpy(ad, newAd, sizeof(newAd));
+ beacon.setUuid(ad);
+ Bluefruit.Advertising.setBeacon(beacon);
+ Bluefruit.Advertising.stop();
+ Bluefruit.Advertising.start(0); 
 }
 
 void loop() {
-	// This sketch displays information every time a new sentence is correctly encoded.
-	while (ss.available() > 0) {
-		if (gps.encode(ss.read())) {
-			displayInfo();
-		}
-	}
 
-	if (millis() > 5000 && gps.charsProcessed() < 10) {
-		Serial.println(F("No GPS detected: check wiring."));
-		while(true);
-	}
-}
+  delay(5);
+ 
+  updateAdvertisement();
 
-void displayInfo() {
-	Serial.print(F("Location: ")); 
-	if (gps.location.isValid()) {
-		Serial.print(gps.location.lat(), 6);
-		Serial.print(F(","));
-		Serial.print(gps.location.lng(), 6);
-	} else {
-		Serial.print(F("INVALID"));
-	}
-
-	Serial.print(F("  Date/Time: "));
-	if (gps.date.isValid()) {
-		Serial.print(gps.date.month());
-		Serial.print(F("/"));
-		Serial.print(gps.date.day());
-		Serial.print(F("/"));
-		Serial.print(gps.date.year());
-	} else {
-		Serial.print(F("INVALID"));
-	}
-
-	Serial.print(F(" "));
-	if (gps.time.isValid()) {
-		if (gps.time.hour() < 10) Serial.print(F("0"));
-		Serial.print(gps.time.hour());
-		Serial.print(F(":"));
-		if (gps.time.minute() < 10) Serial.print(F("0"));
-		Serial.print(gps.time.minute());
-		Serial.print(F(":"));
-		if (gps.time.second() < 10) Serial.print(F("0"));
-		Serial.print(gps.time.second());
-		Serial.print(F("."));
-		if (gps.time.centisecond() < 10) Serial.print(F("0"));
-		Serial.print(gps.time.centisecond());
-	} else {
-		Serial.print(F("INVALID"));
-	}
-
-	Serial.println();
+  delay(5);
 }
