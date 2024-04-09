@@ -5,6 +5,7 @@
 #include <SoftwareSerial.h>
 
 #define MANUFACTURER_ID   0x0059 //Nordic Manufacturer ID
+#define BATTPIN A6
 
 uint8_t beaconUuid[16] = {
   0x21, 0x21, 0x21, 0x21, 
@@ -18,7 +19,9 @@ BLEBeacon beacon(beaconUuid, 1, 2, -54);
 
 TinyGPSPlus gps;
 
-SoftwareSerial serial(A0, A1); //A0 is RX, A1 is TX
+SoftwareSerial serial(A0, A1); //   A0 is RX    A1 is TX
+
+char deviceID[23];
 
 char* getID() {
  static char combinedID[23]; 
@@ -91,8 +94,6 @@ void setup() {
   Serial.begin(9600);
 
   // while ( !Serial ) delay(10);
-
-  char deviceID[23];
   
   strcpy(deviceID, getID());
 
@@ -101,6 +102,8 @@ void setup() {
   Serial.println("--------------------------\n");
 
   Bluefruit.begin();
+
+  Bluefruit.setTxPower(8);
 
   beacon.setManufacturer(MANUFACTURER_ID);
 
@@ -115,6 +118,8 @@ void setup() {
 void startAdv(void)
 {  
   Bluefruit.Advertising.setBeacon(beacon);
+
+  Bluefruit.Advertising.addTxPower();
 
   Bluefruit.ScanResponse.addName();
   
@@ -169,52 +174,97 @@ void loop() {
   // }
   
   // Serial.println("End of loop...");
+
+  float battMeasure;
   
   while (serial.available() > 0) {
-    if(gps.encode(serial.read())){
-          if (gps.location.isUpdated()){
-              // gpsLED.On();
-          }
-          else{
-              // gpsLED.Off();
-          }
-          int err = serial.available();
-          Serial.printf("serial.available: %d, ", err);
+    if (gps.encode(serial.read())) {
 
-          int ret = serial.read();
-          Serial.printf("serial.read: %d, ", ret);
+      Serial.print("Device ID: ");
+      Serial.println(deviceID);
 
-          err = gps.location.isUpdated();
-          Serial.printf("gps.location.isUpdated: %d, ", err);
+      battMeasure = analogRead(BATTPIN);
+      Serial.print("Battery: " ); 
+      battMeasure *= 2;    // we divided by 2, so multiply back
+      battMeasure *= 3.6;  // Multiply by 3.6V, our reference voltage
+      battMeasure /= 1024; // convert to voltage
+      Serial.print("Battery Calculated: " ); 
+      Serial.println(battMeasure);
 
-          err = gps.encode(serial.read());
-          Serial.printf("gps.encode: %d, ", err);
+      int err = serial.available();
+      Serial.printf("serial.available: %d, ", err);
 
-          Serial.printf("Satellites: %d, ", gps.satellites.value());
+      int ret = serial.read();
+      Serial.printf("serial.read: %d, ", ret);
 
-          Serial.printf("Course: %f, ", gps.course.deg());
+      err = gps.location.isUpdated();
+      Serial.printf("gps.location.isUpdated: %d, ", err);
 
-          Serial.print(gps.location.lat());
-          Serial.print(",");
-          Serial.print(gps.location.lng());
-          Serial.print(",");
-          Serial.print(gps.altitude.meters());
-          Serial.print(",");
-          Serial.print(gps.speed.mps());
-          Serial.print(",");
-          Serial.print(gps.time.hour());
-          Serial.print(":");
-          Serial.print(gps.time.minute());
-          Serial.print(":");
-          Serial.println(gps.time.second());
+      err = gps.encode(serial.read());
+      Serial.printf("gps.encode: %d, ", err);
 
-          updatePacket(gps.location.lat(), gps.location.lng(), gps.altitude.meters(), gps.speed.mph());
+      Serial.printf("Satellites: %d, ", gps.satellites.value());
+
+      Serial.printf("Course: %f, ", gps.course.deg());
+
+      Serial.print(gps.location.lat());
+      Serial.print(",");
+      Serial.print(gps.location.lng());
+      Serial.print(",");
+      Serial.print(gps.altitude.meters());
+      Serial.print(",");
+      Serial.print(gps.speed.mps());
+      Serial.print(",");
+      Serial.print(gps.time.hour());
+      Serial.print(":");
+      Serial.print(gps.time.minute());
+      Serial.print(":");
+      Serial.println(gps.time.second());
+
+      updatePacket(gps.location.lat(), gps.location.lng(), gps.altitude.meters(), gps.speed.mph());
       }
   }
 
-  if (millis() > 5000 && gps.charsProcessed() < 10) {
-      Serial.println(("Waiting for connection to satellite..."));
-      while(true);
-  }
+  // if (millis() > 5000 && gps.charsProcessed() < 10) {
+  //     Serial.println(("Waiting for connection to satellite..."));
+  //     while(true);
+  // }
 
 }
+
+//                        Bits    Bytes
+
+// Preamble:               8      1
+// Acc Addr:               32     4
+// PDU Hdr:                16     2
+
+// AD Addr:                48     6
+// AD Flags:               32     4
+// AD Counter:             8      1
+
+// ---Message Header---
+// Message Type:           4      .5
+// Protocol Version:       4      .5
+// Unique ID:              32     4
+
+
+// ---Location Message---
+// Status:                 4      .5
+// Reserved:               4      .5
+// Latitude:               26     3
+// Speed N/S:              6      
+// Longitude:              26     3
+// Speed E/W:              6
+// Operator Latitude:      26     3
+// Speed Down/Up:          2
+// Operator Longitude:     26     3
+// H-Speed Multiplier:     2
+// True/magnetic Heading:  1
+// Altitude Multiplier:    1
+// HeightAGL Multiplier:   1
+// Reserved:               1
+// Altitude (MSL):         12     
+// HeightAGL:              12     
+// Heading:                8      
+
+// CRC                     24
