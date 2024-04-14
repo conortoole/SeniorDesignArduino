@@ -24,6 +24,9 @@ rimLED batLED(10);
 rimLED gpsLED(11);
 rimLED bleLED(12);
 bool check = false;
+bool firstLoop = true;
+double initialLat = 0;
+double initialLng = 0;
 
 
 SoftwareSerial serial(A0, A1); //   A0 is RX    A1 is TX
@@ -142,12 +145,12 @@ void startAdv(void)
 
 void loop() {
   float battMeasure;
-  Serial.println("Begin!");
-
+  // Serial.println("Begin!");
+  // Serial.println(serial.available());
   ///////////// Enter GPS Sequence ////////////////////////
   while (serial.available() > 0) {
       if (gps.encode(serial.read())) {
-
+          
           if (gps.location.isUpdated()){
               gpsLED.On();
           }
@@ -155,8 +158,32 @@ void loop() {
               gpsLED.Off();
           }
 
+          if (firstLoop == true){
+            initialLat = gps.location.lat();
+            initialLng = gps.location.lng();
+            firstLoop = false;
+          }
+
           Serial.print("Device ID: ");
           Serial.println(deviceID);
+     
+          Serial.print(initialLat);
+          Serial.print(",");
+          Serial.print(initialLng);
+          Serial.print(",");
+          Serial.print(gps.location.lat());
+          Serial.print(",");
+          Serial.print(gps.location.lng());
+          Serial.print(",");
+          Serial.print(gps.altitude.meters());
+          Serial.print(",");
+          Serial.print(gps.speed.mps());
+          Serial.print(",");
+          Serial.print(gps.time.hour());
+          Serial.print(":");
+          Serial.print(gps.time.minute());
+          Serial.print(":");
+          Serial.println(gps.time.second());
 
           //////// Read Battery and update LED based off voltage ////////////
           bat.readBattery();
@@ -169,9 +196,8 @@ void loop() {
           ///////// trigger bluetooth /////////////////////////////////////////
           updatePacket(gps.location.lat(), gps.location.lng(), gps.altitude.meters(), gps.speed.mph()); 
           /////////////////////////////////////////////////////////////////
-    }
+          delay(500);
+      }
   }
-
-  delay(500);
 }
 
