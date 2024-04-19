@@ -156,12 +156,19 @@ void updatePacketIDMessage() {
     err = Bluefruit.Advertising.start();
     if (!err) {
         Serial.println("! Failed to start Bluetooth Transmission in updatePacketIDMessage() !");
+        bleLED.Off();
+    }
+    else {
+        bleLED.On();
+        Serial.println("BLE LED turned ON");
     }
 
     Serial.println();
 }
 
 void updatePacketLocationMessage(float speed_mps, float course_degrees, float latitude, float longitude, float altitude, int hours, int minutes, int seconds, int centiseconds) {
+
+    Serial.printf("%.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", speed_mps, course_degrees, latitude, longitude, altitude, hours, minutes, seconds, centiseconds);
 
     uint8_t newMessageData[29] = {
         0x00,                   // 0    AD FLags
@@ -296,6 +303,11 @@ void updatePacketLocationMessage(float speed_mps, float course_degrees, float la
     err = Bluefruit.Advertising.start();
     if (!err) {
         Serial.println("! Failed to start Bluetooth Transmission in updatePacketLocationMessage() !");
+        bleLED.Off();
+    }
+    else {
+        bleLED.On();
+        Serial.println("BLE LED turned ON");
     }
 
     Serial.println();
@@ -325,8 +337,18 @@ void setup() {
 
     err = Bluefruit.Advertising.start();
     if (!err) {
-    Serial.println("! Failed to start Bluetooth Transmission !");
+        Serial.println("! Failed to start Bluetooth Transmission !");
+        bleLED.Off();
     }
+    else {
+        bleLED.On();
+        Serial.println("BLE LED turned ON");
+    }
+
+    batLED.On();
+    bleLED.On();
+    gpsLED.Off();
+
     Serial.println("Advertising started");
     Serial.printf("Broadcasting with MANUFACTURER_ID = 0x%04X\n", MANUFACTURER_ID);
 }
@@ -334,16 +356,18 @@ void setup() {
 void loop() {
 
     while (serial.available() > 0) {
+
         if (gps.encode(serial.read())) {
 
-            updatePacketIDMessage();
+            // updatePacketIDMessage();
+            Serial.printf("Prior to Processes: %d\n", millis());
 
-            bool updated = gps.location.isUpdated();
-            Serial.printf("GPS Update Status: %d\n", updated);
+            // bool updated = gps.location.isUpdated();
+            // Serial.printf("GPS Update Status: %d\n", updated);
 
-            if (updated) {
+            if (gps.time.isValid()) {
                 gpsLED.On();
-                Serial.println("GPS LED turned OFF");
+                Serial.println("GPS LED turned ON");
             }
             else {
                 gpsLED.Off();
@@ -353,25 +377,18 @@ void loop() {
             int err = Bluefruit.Advertising.isRunning();
             Serial.printf("Bluetooth Status: %d\n", err);
 
-            err = serial.available();
-            Serial.printf("UART Serial Status: %d\n", err);
+            // err = serial.available();
+            // Serial.printf("UART Serial Status: %d\n", err);
 
             err = gps.location.isUpdated();
             Serial.printf("GPS Update Status: %d\n", err);
 
-            int num_satellites = gps.satellites.value();
+            uint32_t num_satellites = gps.satellites.value();
             Serial.printf("GPS Satellites Connected: %d\n", num_satellites);
-            
-            float speed = gps.speed.mps();
-            float course = gps.course.deg();
+
             float latitude = gps.location.lat();
             float longitude = gps.location.lng();
             float altitude = gps.altitude.meters();
-
-            int hour = gps.time.hour();
-            int minute = gps.time.minute();
-            int second = gps.time.second();
-            int centisecond = gps.time.centisecond();
 
             if ( (!takeoff_logged) && num_satellites >= 4) {
                 initialLat = latitude;
@@ -379,7 +396,7 @@ void loop() {
                 initialAlt = altitude;
                 takeoff_logged = true;
             }
-
+            
             bat.readBattery();
             float battMeasure = bat.vBat;
             batLED.status = bat.updateLED(batLED);
@@ -387,7 +404,9 @@ void loop() {
             Serial.print("Battery Voltage " ); 
             Serial.println(battMeasure);
 
-            updatePacketLocationMessage(speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+            updatePacketLocationMessage(gps.speed.mps(), gps.course.deg(), latitude, longitude, altitude, gps.time.hour(), gps.time.minute(), gps.time.second(), gps.time.centisecond());
+
+            Serial.printf("After Processes: %d\n", millis());
         }
     }
 }
