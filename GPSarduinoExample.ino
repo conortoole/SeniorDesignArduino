@@ -1,46 +1,71 @@
+#include <rimLED.h>
+#include <rimBattery.h>
 #include <bluefruit.h>
 #include <nrf_soc.h> 
-#include <BLEAdvertising.h>
-#include <BLEUuid.h>
-#include <math.h>
 #include <TinyGPSPlus.h>
 #include <SoftwareSerial.h>
 
-#include <rimLED.h>
-#include <rimBattery.h>
-
 #define MANUFACTURER_ID   0x0059 //Nordic Manufacturer ID
 
-const char* messageData = "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
-
-TinyGPSPlus gps;
+uint8_t newMessageData[29] = {
+        0x00,                   // 0    AD FLags
+        0x0D,                   // 1    AD App
+        0x00,                   // 2    AD Counter
+        0x10,                   // 3    Message Type & Version
+        //
+        0x20,                   // 4    Status, Flags
+        0x00,                   // 5    Speed North/South
+        0x00,                   // 6    Speed East/West
+        0x00,                   // 7    Vertical Speed
+        0x00, 0x00, 0x00, 0x00, // 8    Latitude
+        0x00, 0x00, 0x00, 0x00, // 12   Longitude
+        0x00, 0x00,             // 16   Altitude
+        0x00, 0x00,             // 18   Geodetic Altitude
+        0x00, 0x00,             // 20   Height Above Takeoff
+        0x39,                   // 22   Horizontal/Vertical Location Accuracy
+        0x34,                   // 23   Timestamp/Speed Accuracy
+        0x00, 0x00,             // 24   Timestamp
+        0x00, 0x00,             // 26   Reserved
+        //
+        0x00                    // 28   CRC
+    }; 
 
 rimBattery bat;
+TinyGPSPlus gps;
 
-rimLED batLED(10);
-rimLED gpsLED(11);
 rimLED bleLED(12);
-
-bool takeoff_logged = false;
-float initialLat = 0;
-float initialLng = 0;
-float initialAlt = 0;
 
 SoftwareSerial serial(A0, A1); //   A0 is RX    A1 is TX
 
 char deviceID[23];
 
+uint8_t stamp = 0;
+
+uint8_t counter = 0;
+
+float speed;
+float course;
+float latitude;
+float longitude;
+float altitude;
+
+uint8_t hour;
+uint8_t minute;
+uint8_t second;
+uint8_t centisecond;
+
 char* getID() {
-    static char combinedID[23];
-    char idA[11];
-    char idB[11];
+ static char combinedID[23]; 
 
-    uint32_to_base20(NRF_FICR->DEVICEID[0], idA);
-    uint32_to_base20(NRF_FICR->DEVICEID[1], idB);
+ char idA[11];
+ char idB[11];
 
-    sprintf(combinedID, "%s%s", idA, idB);
+ uint32_to_base20(NRF_FICR->DEVICEID[0], idA);
+ uint32_to_base20(NRF_FICR->DEVICEID[1], idB);
 
-    return combinedID;
+ sprintf(combinedID, "%s%s", idA, idB);
+
+ return combinedID;
 }
 
 void uint32_to_base20(uint32_t value, char* buffer) { 
@@ -114,84 +139,7 @@ uint16_t convertAltitude(float altitude) {
     return  res;
 }
 
-void updatePacketIDMessage() {
-
-        uint8_t newMessageData[29] = {
-        0x00,                   // 0    AD FLags
-        0x0D,                   // 1    AD App
-        0x00,                   // 2    AD Counter
-        0x00,                   // 3    Message Type & Version
-        //
-        0x12,                   // 4    ID Type, UAS Type
-        0x4C, 0x33, 0x48, 0x41, // 5    UAS ID Pefix
-        0x0F,                   // 9    UAS ID Length Code
-        0x00, 0x00, 0x00, 0x00, // 10   UAS ID 
-        0x00, 0x00, 0x00, 0x00, //
-        0x00, 0x00, 0x00, 0x00, //
-        0x00, 0x00, 0x00,       //
-        //
-        0x00, 0x00, 0x00,       // 26   Reserved
-        0x00                    // 28   CRC
-    }; 
-
-    for (int i = 0; i < 15; i++) {
-        newMessageData[10+i] = deviceID[i];
-    }
-
-    Serial.println("Updated Bluetooth Message: ");
-    for (int i = 0; i < 29; i++) {
-        Serial.print(newMessageData[i], HEX);
-        Serial.print(" ");
-    }
-    Serial.println();
-
-    Bluefruit.Advertising.stop(); 
-    Bluefruit.Advertising.clearData();
-
-    int err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData));
-    if (!err) {
-        Serial.println("! Failed to add data in updatePacketIDMessage() !");
-    }
-
-    err = Bluefruit.Advertising.start();
-    if (!err) {
-        Serial.println("! Failed to start Bluetooth Transmission in updatePacketIDMessage() !");
-        bleLED.Off();
-    }
-    else {
-        bleLED.On();
-        Serial.println("BLE LED turned ON");
-    }
-
-    Serial.println();
-}
-
 void updatePacketLocationMessage(float speed_mps, float course_degrees, float latitude, float longitude, float altitude, int hours, int minutes, int seconds, int centiseconds) {
-
-    Serial.printf("%.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", speed_mps, course_degrees, latitude, longitude, altitude, hours, minutes, seconds, centiseconds);
-
-    uint8_t newMessageData[29] = {
-        0x00,                   // 0    AD FLags
-        0x0D,                   // 1    AD App
-        0x00,                   // 2    AD Counter
-        0x10,                   // 3    Message Type & Version
-        //
-        0x20,                   // 4    Status, Flags
-        0x00,                   // 5    Speed North/South
-        0x00,                   // 6    Speed East/West
-        0x00,                   // 7    Vertical Speed
-        0x00, 0x00, 0x00, 0x00, // 8    Latitude
-        0x00, 0x00, 0x00, 0x00, // 12   Longitude
-        0x00, 0x00,             // 16   Altitude
-        0x00, 0x00,             // 18   Geodetic Altitude
-        0x00, 0x00,             // 20   Height Above Takeoff
-        0x39,                   // 22   Horizontal/Vertical Location Accuracy
-        0x34,                   // 23   Timestamp/Speed Accuracy
-        0x00, 0x00,             // 24   Timestamp
-        0x00, 0x00,             // 26   Reserved
-        //
-        0x00                    // 28   CRC
-    }; 
 
     char buffer[5];
 
@@ -281,9 +229,6 @@ void updatePacketLocationMessage(float speed_mps, float course_degrees, float la
     }
  
     // --------------------------------------------------------------------------
-    Serial.printf("\nTime: %d:%d:%d.%d\nProgram ms: ", hours, minutes, seconds, centiseconds);
-    Serial.print(millis());
-    Serial.println();
 
     Serial.println("Updated Bluetooth Message: ");
     for (int i = 0; i < 29; i++) {
@@ -291,49 +236,29 @@ void updatePacketLocationMessage(float speed_mps, float course_degrees, float la
         Serial.print(" ");
     }
     Serial.println();
-
-    Bluefruit.Advertising.stop(); 
-    Bluefruit.Advertising.clearData();
-
-    int err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData));
-    if (!err) {
-        Serial.println("! Failed to add data in updatePacketLocationMessage() !");
-    }
-
-    err = Bluefruit.Advertising.start();
-    if (!err) {
-        Serial.println("! Failed to start Bluetooth Transmission in updatePacketLocationMessage() !");
-        bleLED.Off();
-    }
-    else {
-        bleLED.On();
-        Serial.println("BLE LED turned ON");
-    }
-
-    Serial.println();
 }
 
 void setup() {
     serial.begin(9600);
-    Serial.begin(9600);
-
-    while ( !Serial ) delay(10);
 
     strcpy(deviceID, getID());
 
-    Serial.println("Remote ID Module");
+    Serial.println("Bluefruit52 Beacon Example");
     Serial.println(deviceID);
     Serial.println("--------------------------\n");
 
     int err = Bluefruit.begin();
     if (!err) {
-    Serial.println("! Failed to initialize Bluetooth !");
+        Serial.println("! Failed to initialize Bluetooth !");
     }
 
-    Bluefruit.setTxPower(8);    
+    Bluefruit.setTxPower(8);   
+    Bluefruit.Advertising.setType(BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED); 
 
-    uint8_t messageDataLen = strlen(messageData); 
-    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, messageData, messageDataLen);
+    err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData));
+    if (!err) {
+        Serial.println("! Failed to add data in updatePacketLocationMessage() !");
+    }
 
     err = Bluefruit.Advertising.start();
     if (!err) {
@@ -345,91 +270,74 @@ void setup() {
         Serial.println("BLE LED turned ON");
     }
 
-    batLED.On();
-    bleLED.On();
-    gpsLED.Off();
-
     Serial.println("Advertising started");
-    Serial.printf("Broadcasting with MANUFACTURER_ID = 0x%04X\n", MANUFACTURER_ID);
+    Serial.printf("Broadcasting beacon with MANUFACTURER_ID = 0x%04X\n", MANUFACTURER_ID);
 }
 
 void loop() {
 
-    while (serial.available() > 0) {
+    // if (serial.available() > 0) {
 
-        if (gps.encode(serial.read())) {
+    //     Serial.print("!");
 
-            // updatePacketIDMessage();
-            Serial.printf("Prior to Processes: %d\n", millis());
+        while (serial.available() > 0) {
 
-            // bool updated = gps.location.isUpdated();
-            // Serial.printf("GPS Update Status: %d\n", updated);
-
-            if (gps.time.isValid()) {
-                gpsLED.On();
-                Serial.println("GPS LED turned ON");
-            }
-            else {
-                gpsLED.Off();
-                Serial.println("GPS LED turned OFF");
-            }
-
-            int err = Bluefruit.Advertising.isRunning();
-            Serial.printf("Bluetooth Status: %d\n", err);
-
-            // err = serial.available();
-            // Serial.printf("UART Serial Status: %d\n", err);
-
-            err = gps.location.isUpdated();
-            Serial.printf("GPS Update Status: %d\n", err);
-
-            uint32_t num_satellites = gps.satellites.value();
-            Serial.printf("GPS Satellites Connected: %d\n", num_satellites);
-
-            float latitude = gps.location.lat();
-            float longitude = gps.location.lng();
-            float altitude = gps.altitude.meters();
-
-            if ( (!takeoff_logged) && num_satellites >= 4) {
-                initialLat = latitude;
-                initialLng = longitude;
-                initialAlt = altitude;
-                takeoff_logged = true;
-            }
+            Serial.print(".");
             
-            bat.readBattery();
-            float battMeasure = bat.vBat;
-            batLED.status = bat.updateLED(batLED);
+            if (gps.encode(serial.read())) {
 
-            Serial.print("Battery Voltage " ); 
-            Serial.println(battMeasure);
+                Serial.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 
-            updatePacketLocationMessage(gps.speed.mps(), gps.course.deg(), latitude, longitude, altitude, gps.time.hour(), gps.time.minute(), gps.time.second(), gps.time.centisecond());
+                delay(500);
 
-            Serial.printf("After Processes: %d\n", millis());
+                speed = gps.speed.mps();  
+                course = gps.course.deg();
+                latitude = gps.location.lat();
+                longitude = gps.location.lng();
+                altitude = gps.altitude.meters();
+                
+                hour = gps.time.hour();
+                minute = gps.time.minute();
+                second = gps.time.second();
+                centisecond = gps.time.centisecond();
+                
+            }
         }
-    }
+
+        Serial.printf("\n%d:- %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+        
+        delay(1500);
+
+        updatePacketLocationMessage(speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+
+        int err = Bluefruit.Advertising.stop();
+        if (!err) {
+            Serial.println("Failed stop()");
+        }
+        Serial.print("BLE stopped...");
+
+        Bluefruit.Advertising.clearData();
+
+        Serial.print("Packet cleared...");
+
+        err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData));
+        if (!err) {
+            Serial.println("! Failed to add data in updatePacketLocationMessage() !");
+        }
+
+        Serial.print("Data added...");
+
+        err = Bluefruit.Advertising.start();
+        if (!err) {
+            Serial.println("Failed start()");
+            bleLED.Off();
+        }
+        else {
+            bleLED.On();
+            Serial.print("BLE LED ON");
+        }
+
+        Serial.println("..BLE Started.");
+        delay(20);
+    // }
 }
-
-//----------------------------------
-// Output Packet Received as...
-
-//0: HCI Packet Type            hci_h4.type                           Preamble                             
-//1: Event Code                 bthci_evt.code                        Acc Addr                             
-//2: Parameter Total Length     bthci_evt.param_length                Acc Addr                                 
-//3: Sub Event                  bthci_evt.le_meta_subevent            Acc Addr                              
-//4: Num Reports                bthci_evt.le_num_reports              Acc Addr                             
-//5: Event Type                 bthci_evt.le_advts_event_type         PDU Header
-//6: Peer Address Type          bthci_evt.le_peer_Address_type        PDU Header
-//7-12: BD_ADDR                 bthci_evt.bd_addr                     AD Addr
-//13: Data Length               bthci_evt.data_length                 AD Flags
-//14: Length                    btcommon.eir_ad.entry.length          AD Flags
-//15: Type                      btcommon.eir_ad.entry.type            AD Flags
-//16: LE Limited Discoverable   "".flags.le_limited_discoverable_mode AD Flags
-//17: Length                    btcommon.eir_ad.entry.length          AD Counter
-//18: Type                      btcommon.eir_ad.entry.type            Message Type / Protocol Version
-//19-20: Company ID             btcommon.eir_ad.entry.company_id      Unique ID 
-//21-43: Data                   btcommon.eir_ad.entry.data            Unique ID / Location Message / CRC
-//44: RSSI                      bthci_evt.rssi                        CRC
-
-//----------------------------------
