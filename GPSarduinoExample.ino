@@ -33,6 +33,8 @@ uint8_t newMessageData[29] = {
 rimBattery bat;
 TinyGPSPlus gps;
 
+rimLED gpsLED(11);
+rimLED batLED(10);
 rimLED bleLED(12);
 
 SoftwareSerial serial(A0, A1); //   A0 is RX    A1 is TX
@@ -48,11 +50,15 @@ float course;
 float latitude;
 float longitude;
 float altitude;
+float initialLat;
+float initialLng;
 
 uint8_t hour;
 uint8_t minute;
 uint8_t second;
 uint8_t centisecond;
+
+bool firstLoop = true;
 
 char* getID() {
  static char combinedID[23]; 
@@ -275,20 +281,32 @@ void setup() {
 }
 
 void loop() {
+        /////// Read Battery and update LED based off voltage ////////////
+        bat.readBattery();
+        batLED.status = bat.updateLED(batLED);
 
-    // if (serial.available() > 0) {
-
-    //     Serial.print("!");
-
-        while (serial.available() > 0) {
-
+        Serial.print("Battery Calculated: " ); 
+        Serial.println(bat.vBat);
+        ////// GPS ///////
+        while (serial.available() > 0) { //gets the number of bytes available to be read 
             Serial.print(".");
-            
             if (gps.encode(serial.read())) {
-
                 Serial.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 
                 delay(500);
+
+                if (gps.location.isUpdated()){
+                    gpsLED.On();
+                    if (firstLoop == true){
+                        initialLat = gps.location.lat();
+                        initialLng = gps.location.lng();
+                        firstLoop = false;
+                    }
+
+                }
+                else{
+                    gpsLED.Off();
+                }
 
                 speed = gps.speed.mps();  
                 course = gps.course.deg();
@@ -299,36 +317,34 @@ void loop() {
                 hour = gps.time.hour();
                 minute = gps.time.minute();
                 second = gps.time.second();
-                centisecond = gps.time.centisecond();
-                
+                centisecond = gps.time.centisecond(); 
             }
         }
-
+        //once there are no more bytes immediately available we enter the BLE code 
+        ///// BLE /////
         Serial.printf("\n%d:- %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
-        
-        delay(1500);
 
         updatePacketLocationMessage(speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
 
-        int err = Bluefruit.Advertising.stop();
+        int err = Bluefruit.Advertising.stop(); //stop the ble transmission
         if (!err) {
             Serial.println("Failed stop()");
         }
         Serial.print("BLE stopped...");
 
-        Bluefruit.Advertising.clearData();
+        Bluefruit.Advertising.clearData(); //clear the packet so we can update it 
 
         Serial.print("Packet cleared...");
 
-        err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData));
+        err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData)); //update the packet with the gps data 
         if (!err) {
             Serial.println("! Failed to add data in updatePacketLocationMessage() !");
         }
 
         Serial.print("Data added...");
 
-        err = Bluefruit.Advertising.start();
-        if (!err) {
+        err = Bluefruit.Advertising.start(); //start the ble transmission again 
+        if (!err) {  //update the ble led 
             Serial.println("Failed start()");
             bleLED.Off();
         }
@@ -339,5 +355,5 @@ void loop() {
 
         Serial.println("..BLE Started.");
         delay(20);
-    // }
+    
 }
