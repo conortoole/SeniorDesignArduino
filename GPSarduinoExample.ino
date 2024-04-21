@@ -4,6 +4,31 @@
 #include <rimLED.h>
 #include <rimBattery.h>
 
+#define MANUFACTURER_ID   0x0059 //Nordic Manufacturer ID
+
+uint8_t messageData[29] = {
+        0x00,                   // 0    AD FLags
+        0x0D,                   // 1    AD App
+        0x00,                   // 2    AD Counter
+        0x10,                   // 3    Message Type & Version
+        //
+        0x20,                   // 4    Status, Flags
+        0x00,                   // 5    Speed North/South
+        0x00,                   // 6    Speed East/West
+        0x00,                   // 7    Vertical Speed
+        0x00, 0x00, 0x00, 0x00, // 8    Latitude
+        0x00, 0x00, 0x00, 0x00, // 12   Longitude
+        0x00, 0x00,             // 16   Altitude
+        0x00, 0x00,             // 18   Geodetic Altitude
+        0x00, 0x00,             // 20   Height Above Takeoff
+        0x39,                   // 22   Horizontal/Vertical Location Accuracy
+        0x34,                   // 23   Timestamp/Speed Accuracy
+        0x00, 0x00,             // 24   Timestamp
+        0x00, 0x00,             // 26   Reserved
+        //
+        0x00                    // 28   CRC
+    }; 
+
 // Create instances of GPS and Bluetooth
 SoftwareSerial serial(A0, A1); //   A0 is RX    A1 is TX
 TinyGPSPlus gps;
@@ -15,19 +40,42 @@ rimLED batLED(10);
 rimLED gpsLED(11);
 rimLED bleLED(12);
 
+float speed;
+float course;
+float latitude;
+float longitude;
+float altitude;
+float initialLat;
+float initialLng;
+float initialAlt;
+
+uint8_t hour;
+uint8_t minute;
+uint8_t second;
+uint8_t centisecond;
+
 // Create a timer for Bluetooth advertising updates
 unsigned long bluetoothTimer = 0;
 const unsigned long BLUETOOTH_INTERVAL = 1000; // Update every 1 second
 
 // GPS and Bluetooth status variables
 bool takeoff_logged = false;
-float initialLat = 0.0;
-float initialLng = 0.0;
-float initialAlt = 0.0;
 
 void processGPSData() {
-    // Update GPS LED status
-    Serial.println("Entered processGPSData()");
+
+    speed = gps.speed.mps();  
+    course = gps.course.deg();
+    latitude = gps.location.lat();
+    longitude = gps.location.lng();
+    altitude = gps.altitude.meters();
+    
+    hour = gps.time.hour();
+    minute = gps.time.minute();
+    second = gps.time.second();
+    centisecond = gps.time.centisecond(); 
+
+    Serial.printf("\n%d:-within encode: %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+    Serial.printf("Bluetooth status: %d\n", Bluefruit.Advertising.isRunning());
 
     if (gps.time.isValid()) {
         gpsLED.On();
@@ -37,9 +85,9 @@ void processGPSData() {
 
     // Check if takeoff location needs to be logged
     if (!takeoff_logged && gps.satellites.value() >= 4) {
-        initialLat = gps.location.lat();
-        initialLng = gps.location.lng();
-        initialAlt = gps.altitude.meters();
+        initialLat = latitude;
+        initialLng = longitude;
+        initialAlt = altitude;
         takeoff_logged = true;
     }
 
@@ -47,6 +95,13 @@ void processGPSData() {
     bat.readBattery();
     float battMeasure = bat.vBat;
     batLED.status = bat.updateLED(batLED);
+
+    Serial.print("Message: ");
+    for (int i = 0; i < 29; i++) {
+        Serial.print(messageData[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
 }
 
 
@@ -103,116 +158,199 @@ uint16_t convertAltitude(float altitude) {
     return  res;
 }
 
-void updateBluetoothAdvertising() {
-    
-    // Create a new message data array
-    uint8_t newMessageData[29] = {
-        0x00,                   // 0    AD Flags
-        0x0D,                   // 1    AD App
-        0x00,                   // 2    AD Counter
-        0x10,                   // 3    Message Type & Version
-        //
-        0x20,                   // 4    Status, Flags
-        0x00,                   // 5    Speed North/South
-        0x00,                   // 6    Speed East/West
-        0x00,                   // 7    Vertical Speed
-        0x00, 0x00, 0x00, 0x00, // 8    Latitude
-        0x00, 0x00, 0x00, 0x00, // 12   Longitude
-        0x00, 0x00,             // 16   Altitude
-        0x00, 0x00,             // 18   Geodetic Altitude
-        0x00, 0x00,             // 20   Height Above Takeoff
-        0x39,                   // 22   Horizontal/Vertical Location Accuracy
-        0x34,                   // 23   Timestamp/Speed Accuracy
-        0x00, 0x00,             // 24   Timestamp
-        0x00, 0x00,             // 26   Reserved
-        //
-        0x00                    // 28   CRC
-    };
+void updatePacketLocationMessage(float speed_mps, float course_degrees, float latitude, float longitude, float altitude, int hours, int minutes, int seconds, int centiseconds) {
 
-    // Fill the message data array with GPS information
-    float latitude = gps.location.lat();
-    float longitude = gps.location.lng();
-    float altitude = gps.altitude.meters();
-    float speed = gps.speed.mps();
-    float course = gps.course.deg();
-    int hours = gps.time.hour();
-    int minutes = gps.time.minute();
-    int seconds = gps.time.second();
-    int centiseconds = gps.time.centisecond();
+    char buffer[5];
 
-    // Convert and store GPS data in the message data array
+    // --------------------------------------------------------------------------
+    // Speed North/South & Speed East/West
+
+    bool speed_ns_multiplier = false;
+    bool speed_ew_multiplier = false;
+
+    float speed_ns;
+    float speed_ew;
+
+    int8_t speed_ns_out;
+    int8_t speed_ew_out;
+
+    calculateSpeeds(speed_mps, course_degrees, speed_ns, speed_ew);
+
+    speed_ns_out = convertSpeed(speed_ns, speed_ns_multiplier);
+    speed_ew_out = convertSpeed(speed_ew, speed_ew_multiplier);
+
+    sprintf(buffer, "%02X", speed_ns_out); 
+    messageData[5] = buffer[0];
+
+    sprintf(buffer, "%02X", speed_ew_out); 
+    messageData[6] = buffer[0];
+
+    // --------------------------------------------------------------------------
+    // Status & Flags
+
+    if (speed_ns_multiplier) {
+        buffer[0] = 0x02;           // 0000 0010
+    }
+    else {
+        buffer[0] = 0x00;           // 0000 0000
+    }
+
+    if (speed_ew_multiplier) {
+        buffer[0] += 1;
+    }
+
+    messageData[4] = buffer[0];
+
+    // --------------------------------------------------------------------------
+    // Vertical Speed
+
+    // int8_t speed_vertical_out = convertVerticalSpeed(speed_vertical);
+    // sprintf(buffer, "%08X", speed_vertical_out); 
+    // newMessageData[7] = buffer[0];
+
+    // --------------------------------------------------------------------------
+    // Latitude                 Longitude
+
     int32_t latitude_out = convertLatLon(latitude);
-    memcpy(&newMessageData[8], &latitude_out, sizeof(latitude_out));
+    sprintf(buffer, "%08X", latitude_out); 
+    for (int i = 0; i < 4; i++) {
+        messageData[8+i] = buffer[i];
+    }
 
     int32_t longitude_out = convertLatLon(longitude);
-    memcpy(&newMessageData[12], &longitude_out, sizeof(longitude_out));
+    sprintf(buffer, "%08X", longitude_out); 
+    for (int i = 0; i < 4; i++) {
+        messageData[12+i] = buffer[i];
+    }
+
+    // --------------------------------------------------------------------------
+    // Altitude
 
     uint16_t altitude_out = convertAltitude(altitude);
-    memcpy(&newMessageData[16], &altitude_out, sizeof(altitude_out));
-    memcpy(&newMessageData[18], &altitude_out, sizeof(altitude_out));
+    
+    sprintf(buffer, "%04X", altitude_out); 
+    for (int i = 0; i < 2; i++) {
+        messageData[16+i] = buffer[i];
+        messageData[18+i] = buffer[i];
+    }
 
-    float speed_ns, speed_ew;
-    bool speed_ns_multiplier, speed_ew_multiplier;
-    calculateSpeeds(speed, course, speed_ns, speed_ew);
-    int8_t speed_ns_out = convertSpeed(speed_ns, speed_ns_multiplier);
-    int8_t speed_ew_out = convertSpeed(speed_ew, speed_ew_multiplier);
-    newMessageData[5] = speed_ns_out;
-    newMessageData[6] = speed_ew_out;
-    newMessageData[4] = (speed_ns_multiplier ? 0x02 : 0x00) + (speed_ew_multiplier ? 0x01 : 0x00);
+    // --------------------------------------------------------------------------
+
+    //TODO Height above takeoff
+
+    // --------------------------------------------------------------------------
+    // Timestamp
 
     uint16_t time_out = (6000 * minutes) + (100 * seconds) + centiseconds;
-    memcpy(&newMessageData[24], &time_out, sizeof(time_out));
-
-
-    // Stop the current advertising
-    Bluefruit.Advertising.stop();
-
-    // Clear the existing advertising data
-    Bluefruit.Advertising.clearData();
-
-    // Add the new message data to the advertising payload
-    int err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, newMessageData, sizeof(newMessageData));
-    if (!err) {
-        Serial.println("Failed to add data to Bluetooth advertising!");
+    Serial.println(time_out);
+    sprintf(buffer, "%04X", time_out); 
+    for (int i = 0; i < 2; i++) {
+        Serial.print(buffer[i]);
     }
 
-    Serial.printf("\n%d:- %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hours, minutes, seconds, centiseconds);
-
-    // Start advertising
-    err = Bluefruit.Advertising.start();
-    if (err) {
-        bleLED.On();
-    } else {
-        bleLED.Off();
+    for (int i = 0; i < 2; i++) {
+        messageData[24+i] = buffer[i];
     }
+ 
+    // --------------------------------------------------------------------------
+
+    Serial.println();
+
+    Serial.printf("%d - Updated Message: ", millis());
+    for (int i = 0; i < 29; i++) {
+        Serial.print(messageData[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
 }
 
-
 void setup() {
+    delay(1000);
+    serial.begin(9600);
+    Serial.begin(9600);
 
-    // Initialize Bluetooth
-    Bluefruit.begin();
+    while (!Serial) ;
+
+    Serial.println("Bluefruit52 Beacon Example");
+    Serial.println("--------------------------\n");
+
+    int err = Bluefruit.begin();
+    if (!err) {
+        Serial.println("! Failed to initialize Bluetooth !");
+    }
+
     Bluefruit.setTxPower(8);
-    Bluefruit.setName("RemoteID");
-    bleuart.begin();
+    Bluefruit.Advertising.setType(BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED); 
 
-    // Initialize LED indicators
+    err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, messageData, sizeof(messageData));
+    if (!err) {
+        Serial.println("! Failed to add data in updatePacketLocationMessage() !");
+    }
+
+    err = Bluefruit.Advertising.start();
+    if (!err) {
+        Serial.println("! Failed to start Bluetooth Transmission !");
+        bleLED.Off();
+    }
+    else {
+        bleLED.On();
+        Serial.println("BLE LED turned ON");
+    }
+    
     gpsLED.On();    
-    bleLED.On();
     batLED.On();
+
 }
 
 void loop() {
-    // Check for incoming GPS data
+
     while (serial.available() > 0) {
+
+        Serial.print(".");
+
         if (gps.encode(serial.read())) {
             processGPSData();
         }
+
     }
 
     // Check if it's time to update Bluetooth advertising
     if (millis() - bluetoothTimer >= BLUETOOTH_INTERVAL) {
         bluetoothTimer = millis();
-        updateBluetoothAdvertising();
+        updatePacketLocationMessage(speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+
+        Serial.printf("\n%d:-within intrvl: %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+        Serial.printf("Bluetooth status: %d\n", Bluefruit.Advertising.isRunning());
+
+        // int err = Bluefruit.Advertising.stop(); //stop the ble transmission
+        // if (!err) {
+        //     Serial.println("Failed stop()");
+        // }
+        // Serial.print("BLE stopped...");
+
+        Bluefruit.Advertising.clearData(); //clear the packet so we can update it 
+
+        Serial.print("Packet cleared...");
+
+        int err = Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, messageData, sizeof(messageData)); //update the packet with the gps data 
+        if (!err) {
+            Serial.println("! Failed to add data in updatePacketLocationMessage() !");
+        }
+
+        // Serial.print("Data added...");
+
+        // err = Bluefruit.Advertising.start(); //start the ble transmission again 
+        // if (!err) {  //update the ble led 
+        //     Serial.println("Failed start()");
+        //     bleLED.Off();
+        // }
+        // else {
+        //     bleLED.On();
+        //     Serial.print("BLE LED ON");
+        // }
+
+        // Serial.println("..BLE Started.");
+        // Serial.println(millis());
     }
+
 }
