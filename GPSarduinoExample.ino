@@ -56,7 +56,7 @@ uint8_t centisecond;
 
 // Create a timer for Bluetooth advertising updates
 unsigned long bluetoothTimer = 0;
-const unsigned long BLUETOOTH_INTERVAL = 1000; // Update every 1 second
+const unsigned long BLUETOOTH_INTERVAL = 750; // Update every 1 second
 
 // GPS and Bluetooth status variables
 bool takeoff_logged = false;
@@ -74,7 +74,7 @@ void processGPSData() {
     second = gps.time.second();
     centisecond = gps.time.centisecond(); 
 
-    Serial.printf("\n%d:-within encode: %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
+    Serial.printf("\n%d - stored     : %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
     Serial.printf("Bluetooth status: %d\n", Bluefruit.Advertising.isRunning());
 
     if (gps.time.isValid()) {
@@ -96,7 +96,7 @@ void processGPSData() {
     float battMeasure = bat.vBat;
     batLED.status = bat.updateLED(batLED);
 
-    Serial.print("Message: ");
+    Serial.printf("%d - Message (stored)     : ", millis());
     for (int i = 0; i < 29; i++) {
         Serial.print(messageData[i], HEX);
         Serial.print(" ");
@@ -179,11 +179,8 @@ void updatePacketLocationMessage(float speed_mps, float course_degrees, float la
     speed_ns_out = convertSpeed(speed_ns, speed_ns_multiplier);
     speed_ew_out = convertSpeed(speed_ew, speed_ew_multiplier);
 
-    sprintf(buffer, "%02X", speed_ns_out); 
-    messageData[5] = buffer[0];
-
-    sprintf(buffer, "%02X", speed_ew_out); 
-    messageData[6] = buffer[0];
+    messageData[5] = speed_ns_out;
+    messageData[6] = speed_ew_out;
 
     // --------------------------------------------------------------------------
     // Status & Flags
@@ -199,64 +196,60 @@ void updatePacketLocationMessage(float speed_mps, float course_degrees, float la
         buffer[0] += 1;
     }
 
-    messageData[4] = buffer[0];
+    messageData[4] += buffer[0];
 
     // --------------------------------------------------------------------------
     // Vertical Speed
 
-    // int8_t speed_vertical_out = convertVerticalSpeed(speed_vertical);
-    // sprintf(buffer, "%08X", speed_vertical_out); 
-    // newMessageData[7] = buffer[0];
+    float vertical_speed = sqrt((speed_mps * speed_mps) - (speed_ns * speed_ns) - (speed_ew * speed_ew));
+
+    int8_t speed_vertical_out = convertVerticalSpeed(vertical_speed);
+    messageData[7] = speed_vertical_out;
 
     // --------------------------------------------------------------------------
     // Latitude                 Longitude
 
     int32_t latitude_out = convertLatLon(latitude);
-    sprintf(buffer, "%08X", latitude_out); 
-    for (int i = 0; i < 4; i++) {
-        messageData[8+i] = buffer[i];
-    }
+    messageData[8] = (latitude_out >> 24) & 0xFF;
+    messageData[9] = (latitude_out >> 16) & 0xFF;
+    messageData[10] = (latitude_out >> 8) & 0xFF;
+    messageData[11] = latitude_out & 0xFF;
 
     int32_t longitude_out = convertLatLon(longitude);
-    sprintf(buffer, "%08X", longitude_out); 
-    for (int i = 0; i < 4; i++) {
-        messageData[12+i] = buffer[i];
-    }
+    messageData[12] = (longitude_out >> 24) & 0xFF;
+    messageData[13] = (longitude_out >> 16) & 0xFF;
+    messageData[14] = (longitude_out >> 8) & 0xFF;
+    messageData[15] = longitude_out & 0xFF;
 
     // --------------------------------------------------------------------------
     // Altitude
 
     uint16_t altitude_out = convertAltitude(altitude);
-    
-    sprintf(buffer, "%04X", altitude_out); 
-    for (int i = 0; i < 2; i++) {
-        messageData[16+i] = buffer[i];
-        messageData[18+i] = buffer[i];
-    }
+    messageData[16] = (altitude_out >> 8) & 0xFF;
+    messageData[17] = altitude_out & 0xFF;
+    messageData[18] = (altitude_out >> 8) & 0xFF;
+    messageData[19] = altitude_out & 0xFF;
 
     // --------------------------------------------------------------------------
+    // Height Above Takeoff
 
-    //TODO Height above takeoff
+    float height_above_takeoff = altitude - initialAlt;
+    uint16_t height_above_takeoff_out = convertAltitude(height_above_takeoff);
+    messageData[20] = (height_above_takeoff_out >> 8) & 0xFF;
+    messageData[21] = height_above_takeoff_out & 0xFF;
 
     // --------------------------------------------------------------------------
     // Timestamp
 
     uint16_t time_out = (6000 * minutes) + (100 * seconds) + centiseconds;
-    Serial.println(time_out);
-    sprintf(buffer, "%04X", time_out); 
-    for (int i = 0; i < 2; i++) {
-        Serial.print(buffer[i]);
-    }
+    messageData[24] = (time_out >> 8) & 0xFF;
+    messageData[25] = time_out & 0xFF;
 
-    for (int i = 0; i < 2; i++) {
-        messageData[24+i] = buffer[i];
-    }
- 
     // --------------------------------------------------------------------------
 
     Serial.println();
 
-    Serial.printf("%d - Updated Message: ", millis());
+    Serial.printf("%d - Message (transmitted): ", millis());
     for (int i = 0; i < 29; i++) {
         Serial.print(messageData[i], HEX);
         Serial.print(" ");
@@ -299,7 +292,6 @@ void setup() {
     
     gpsLED.On();    
     batLED.On();
-
 }
 
 void loop() {
@@ -314,21 +306,13 @@ void loop() {
 
     }
 
-    // Check if it's time to update Bluetooth advertising
     if (millis() - bluetoothTimer >= BLUETOOTH_INTERVAL) {
         bluetoothTimer = millis();
         updatePacketLocationMessage(speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
 
-        Serial.printf("\n%d:-within intrvl: %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
-        Serial.printf("Bluetooth status: %d\n", Bluefruit.Advertising.isRunning());
+        Serial.printf("\n%d- transmitted: %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
 
-        // int err = Bluefruit.Advertising.stop(); //stop the ble transmission
-        // if (!err) {
-        //     Serial.println("Failed stop()");
-        // }
-        // Serial.print("BLE stopped...");
-
-        Bluefruit.Advertising.clearData(); //clear the packet so we can update it 
+        Bluefruit.Advertising.clearData(); 
 
         Serial.print("Packet cleared...");
 
@@ -337,20 +321,15 @@ void loop() {
             Serial.println("! Failed to add data in updatePacketLocationMessage() !");
         }
 
-        // Serial.print("Data added...");
+        Serial.println("...Data added.");
 
-        // err = Bluefruit.Advertising.start(); //start the ble transmission again 
-        // if (!err) {  //update the ble led 
-        //     Serial.println("Failed start()");
-        //     bleLED.Off();
-        // }
-        // else {
-        //     bleLED.On();
-        //     Serial.print("BLE LED ON");
-        // }
-
-        // Serial.println("..BLE Started.");
-        // Serial.println(millis());
+        err = Bluefruit.Advertising.isRunning();
+        Serial.printf("Bluetooth status: %d\n", err);
+        if (!err) {  
+            bleLED.Off();
+        }
+        else {
+            bleLED.On();
+        }
     }
-
 }
