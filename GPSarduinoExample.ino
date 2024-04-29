@@ -77,18 +77,12 @@ void processGPSData() {
     Serial.printf("\n%d - stored     : %.3f, %.3f, %.3f, %.3f, %.3f, %d:%d:%d.%d\n", millis(), speed, course, latitude, longitude, altitude, hour, minute, second, centisecond);
     Serial.printf("Bluetooth status: %d\n", Bluefruit.Advertising.isRunning());
 
-    if (gps.time.isValid()) {
-        gpsLED.On();
-    } else {
-        gpsLED.Off();
-    }
-
     // Check if takeoff location needs to be logged
     if (!takeoff_logged && gps.satellites.value() >= 4) {
-        initialLat = latitude;
-        initialLng = longitude;
-        initialAlt = altitude;
-        takeoff_logged = true;
+      initialLat = latitude;
+      initialLng = longitude;
+      initialAlt = altitude;
+      takeoff_logged = true;
     }
 
     // Read battery voltage and update battery LED
@@ -290,18 +284,23 @@ void setup() {
         Serial.println("BLE LED turned ON");
     }
     
-    gpsLED.On();    
+    //gpsLED.On();    
     batLED.On();
 }
 
 void loop() {
-
+   // gpsLED.On();
     while (serial.available() > 0) {
 
         Serial.print(".");
 
         if (gps.encode(serial.read())) {
             processGPSData();
+            if (gps.satellites.value() >= 3) {
+                gpsLED.On();
+            } else {
+                gpsLED.Off();
+            }
         }
 
     }
